@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AG-Grid Memory Test</title>
+    
+    <!-- AG-Grid CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ag-grid/31.0.0/styles/ag-grid.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/ag-grid/31.0.0/styles/ag-theme-alpine.css">
+    
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h2 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .settings-info {
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #666;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        
+        .start-stop {
+            background-color: #007bff;
+            color: white;
+        }
+        
+        .start-stop:hover {
+            background-color: #0056b3;
+        }
+        
+        .start-stop.stop {
+            background-color: #dc3545;
+        }
+        
+        .start-stop.stop:hover {
+            background-color: #c82333;
+        }
+        
+        .reset-btn {
+            background-color: #6c757d;
+            color: white;
+        }
+        
+        .reset-btn:hover {
+            background-color: #545b62;
+        }
+        
+        .clear-btn {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .clear-btn:hover {
+            background-color: #e0a800;
+        }
+        
+        .destroy-btn {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .destroy-btn:hover {
+            background-color: #c82333;
+        }
+        
+        .row-count {
+            margin-left: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .grid-container {
+            height: 600px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>AG-Grid Memory Test - Vanilla JavaScript Transactions</h2>
+        
+        <div class="settings-info">
+            <strong>Settings:</strong> <span id="settings-display"></span>
+        </div>
+        
+        <div class="controls">
+            <button id="toggleBtn" class="start-stop">Start Updates</button>
+            <button id="resetBtn" class="reset-btn">Reset</button>
+            <button id="clearBtn" class="clear-btn">Clear</button>
+            <button id="destroyBtn" class="destroy-btn">Destroy</button>
+            <span class="row-count">Rows: <span id="rowCount">0</span></span>
+        </div>
+
+        <div id="myGrid" class="ag-theme-alpine grid-container"></div>
+    </div>
+
+    <!-- AG-Grid JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ag-grid/31.0.0/ag-grid-community.min.js"></script>
+    
+    <script>
+        // Settings configuration
+        const settings = {
+            initialRowCount: 10000,
+            updateFrequency: 500,
+            maxRemoveRowCount: 1000,
+            columnCount: 30,
+        };
+
+        // Application state
+        let isRunning = false;
+        let rowCount = 0;
+        let gridApi = null;
+        let intervalId = null;
+        let nextId = settings.initialRowCount;
+
+        // Initialize settings display
+        document.getElementById('settings-display').textContent = 
+            `${settings.columnCount} columns, ${settings.initialRowCount} initial rows, update frequency: ${settings.updateFrequency} ms`;
+
+        // Utility functions
+        function createRow(id) {
+            const row = { id };
+            
+            for (let i = 1; i <= settings.columnCount; i++) {
+                if (i % 2 === 1) {
+                    row[`col${i}`] = `Value ${id}-${i}`;
+                } else {
+                    row[`col${i}`] = Math.floor(Math.random() * 1000);
+                }
+            }
+            
+            return row;
+        }
+
+        function generateInitialData() {
+            const data = [];
+            for (let i = 0; i < settings.initialRowCount; i++) {
+                data.push(createRow(i));
+            }
+            return data;
+        }
+
+        function generateColumnDefs() {
+            const columns = [
+                { field: "id", headerName: "ID", width: 80 }
+            ];
+
+            for (let i = 1; i <= settings.columnCount; i++) {
+                columns.push({
+                    field: `col${i}`,
+                    headerName: `Column ${i}`,
+                    width: 120,
+                });
+            }
+
+            return columns;
+        }
+
+        function updateRowCount() {
+            const currentRows = [];
+            gridApi.forEachNode((node) => {
+                if (node.data) {
+                    currentRows.push(node.data);
+                }
+            });
+            rowCount = currentRows.length;
+            document.getElementById('rowCount').textContent = rowCount;
+        }
+
+        function initializeData() {
+            if (!gridApi) return;
+
+            const initialData = generateInitialData();
+            gridApi.setGridOption("rowData", initialData);
+            nextId = settings.initialRowCount;
+            updateRowCount();
+        }
+
+        function performUpdate() {
+            if (!gridApi) return;
+
+            // Get current rows
+            const currentRows = [];
+            gridApi.forEachNode((node) => {
+                if (node.data) {
+                    currentRows.push(node.data);
+                }
+            });
+
+            const currentCount = currentRows.length;
+
+            // Determine how many rows to remove
+            const removeCount = Math.min(
+                Math.floor(Math.random() * settings.maxRemoveRowCount),
+                currentCount
+            );
+
+            const rowsToRemove = [];
+
+            if (removeCount > 0) {
+                // Randomly select rows to remove
+                const shuffledRows = [...currentRows].sort(() => Math.random() - 0.5);
+                rowsToRemove.push(...shuffledRows.slice(0, removeCount));
+            }
+
+            // Create new rows to replace removed ones
+            const rowsToAdd = [];
+            for (let i = 0; i < rowsToRemove.length; i++) {
+                rowsToAdd.push(createRow(nextId++));
+            }
+
+            // Apply transaction
+            const transaction = {
+                remove: rowsToRemove,
+                add: rowsToAdd,
+            };
+
+            console.log(`Adding: ${rowsToAdd.length} rows, removing: ${rowsToRemove.length} rows`);
+
+            gridApi.applyTransaction(transaction);
+            updateRowCount();
+        }
+
+        function toggleUpdates() {
+            if (isRunning) {
+                if (intervalId) {
+                    clearInterval(intervalId);
+                    intervalId = null;
+                }
+                isRunning = false;
+                document.getElementById('toggleBtn').textContent = 'Start Updates';
+                document.getElementById('toggleBtn').classList.remove('stop');
+            } else {
+                intervalId = setInterval(performUpdate, settings.updateFrequency);
+                isRunning = true;
+                document.getElementById('toggleBtn').textContent = 'Stop Updates';
+                document.getElementById('toggleBtn').classList.add('stop');
+            }
+        }
+
+        function handleClear() {
+            console.log("Cleaning up grid...");
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+                isRunning = false;
+                document.getElementById('toggleBtn').textContent = 'Start Updates';
+                document.getElementById('toggleBtn').classList.remove('stop');
+            }
+            gridApi.setGridOption("rowData", []);
+            updateRowCount();
+        }
+
+        function handleDestroy() {
+            console.log("Destroying grid...");
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+                isRunning = false;
+                document.getElementById('toggleBtn').textContent = 'Start Updates';
+                document.getElementById('toggleBtn').classList.remove('stop');
+            }
+            if (gridApi) {
+                gridApi.destroy();
+                gridApi = null;
+            }
+            document.getElementById('rowCount').textContent = '0';
+        }
+
+        // Grid configuration
+        const gridOptions = {
+            columnDefs: generateColumnDefs(),
+            getRowId: (params) => params.data.id.toString(),
+            suppressColumnVirtualisation: true,
+            onGridReady: (event) => {
+                gridApi = event.api;
+                initializeData();
+            }
+        };
+
+        // Initialize grid when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            const gridDiv = document.querySelector('#myGrid');
+            agGrid.createGrid(gridDiv, gridOptions);
+
+            // Event listeners
+            document.getElementById('toggleBtn').addEventListener('click', toggleUpdates);
+            document.getElementById('resetBtn').addEventListener('click', initializeData);
+            document.getElementById('clearBtn').addEventListener('click', handleClear);
+            document.getElementById('destroyBtn').addEventListener('click', handleDestroy);
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (intervalId) {
+                clearInterval(intervalId);
+            }
+        });
+    </script>
+</body>
+</html>
